@@ -1,0 +1,7 @@
+faster-whisper
+sounddevice
+numpy
+pyperclip
+pynput
+requests
+pyobjc-framework-Cocoa; sys_platform == "darwin"

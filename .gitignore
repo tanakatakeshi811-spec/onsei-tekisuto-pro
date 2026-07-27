@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+config.json
+_tts_tmp.txt
+build/
+dist/
+*.spec

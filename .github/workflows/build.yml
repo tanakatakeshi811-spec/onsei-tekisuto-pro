@@ -1,0 +1,73 @@
+name: Build and release
+
+# vX.Y.Zのようなタグをpushすると、Windows用exeとMac用.appを自動ビルドして
+# GitHub Releaseにアップロードする。手動実行(workflow_dispatch)にも対応。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リリースを作成(無ければ)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes || echo "release already exists, continue"
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 依存パッケージをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: PyInstallerでexe化
+        run: pyinstaller --onefile --windowed --name OnseiTekisutoPro main.py
+      - name: zipに固める
+        run: Compress-Archive -Path dist/OnseiTekisutoPro.exe -DestinationPath OnseiTekisutoPro-Windows.zip
+      - name: リリースにアップロード
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" OnseiTekisutoPro-Windows.zip --repo "${{ github.repository }}" --clobber
+
+  build-macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 依存パッケージをインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: PyInstallerで.appを作成
+        run: pyinstaller --windowed --name OnseiTekisutoPro main.py
+      - name: zipに固める
+        run: |
+          cd dist
+          zip -r ../OnseiTekisutoPro-Mac.zip OnseiTekisutoPro.app
+      - name: リリースにアップロード
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" OnseiTekisutoPro-Mac.zip --repo "${{ github.repository }}" --clobber

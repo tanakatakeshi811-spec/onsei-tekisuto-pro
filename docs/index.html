@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ONsei TEkisuto Pro ダウンロード</title>
+<style>
+  :root {
+    --bg: #141715;
+    --panel: #1e211f;
+    --panel-dark: #0d0f0e;
+    --neon: #3dff6e;
+    --neon-dim: #2bb84f;
+    --text-main: #d6f5de;
+    --text-dim: #93a89b;
+    --border: #2f3a33;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-main);
+    font-family: "Segoe UI", "Meiryo", "Hiragino Sans", sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 48px 20px 80px;
+  }
+  main { width: 100%; max-width: 640px; }
+  .cat {
+    display: block;
+    margin: 0 auto 8px;
+  }
+  h1 {
+    text-align: center;
+    color: var(--neon);
+    font-size: 1.7rem;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px;
+  }
+  .sub {
+    text-align: center;
+    color: var(--text-dim);
+    margin-bottom: 36px;
+    font-size: 0.95rem;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 36px;
+  }
+  @media (max-width: 520px) {
+    .cards { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 18px;
+    text-align: center;
+    transition: border-color 0.15s ease;
+  }
+  .card.recommended {
+    border-color: var(--neon-dim);
+    box-shadow: 0 0 0 1px var(--neon-dim) inset;
+  }
+  .card .os-icon { font-size: 2.2rem; margin-bottom: 8px; }
+  .card h2 { margin: 0 0 4px; font-size: 1.05rem; color: var(--text-main); }
+  .card p { margin: 0 0 16px; color: var(--text-dim); font-size: 0.82rem; }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    color: var(--neon);
+    border: 1px solid var(--neon-dim);
+    border-radius: 999px;
+    padding: 2px 10px;
+    margin-bottom: 10px;
+  }
+  .btn {
+    display: inline-block;
+    width: 100%;
+    padding: 10px 0;
+    border-radius: 8px;
+    background: var(--neon);
+    color: #06210f;
+    font-weight: 700;
+    text-decoration: none;
+    font-size: 0.92rem;
+  }
+  .btn:hover { background: #63ff92; }
+  section.features {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+  }
+  section.features h2 {
+    color: var(--neon);
+    font-size: 1rem;
+    margin-top: 0;
+  }
+  section.features ul {
+    margin: 0;
+    padding-left: 1.2em;
+    color: var(--text-main);
+    font-size: 0.9rem;
+    line-height: 1.8;
+  }
+  .note {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-align: center;
+    line-height: 1.7;
+  }
+  .note a { color: var(--neon); }
+</style>
+</head>
+<body>
+<main>
+  <svg class="cat" width="70" height="60" viewBox="0 0 76 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="38" cy="36" rx="18" ry="16" stroke="#3dff6e" stroke-width="2"/>
+    <path d="M22 26 L26 10 L36 22" stroke="#3dff6e" stroke-width="2"/>
+    <path d="M54 26 L50 10 L40 22" stroke="#3dff6e" stroke-width="2"/>
+    <circle cx="32" cy="33" r="2" fill="#3dff6e"/>
+    <circle cx="44" cy="33" r="2" fill="#3dff6e"/>
+  </svg>
+  <h1>ONsei TEkisuto Pro</h1>
+  <p class="sub">Windows / Mac常駐の音声ディクテーション &amp; 翻訳ツール</p>
+
+  <div class="cards">
+    <div class="card" id="card-windows">
+      <div class="os-icon">🪟</div>
+      <h2>Windows</h2>
+      <p>Windows 10 / 11</p>
+      <a class="btn" href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest/download/OnseiTekisutoPro-Windows.zip">
+        ダウンロード (.zip)
+      </a>
+    </div>
+    <div class="card" id="card-mac">
+      <div class="os-icon">🍎</div>
+      <h2>Mac</h2>
+      <p>macOS (Intel / Apple Silicon)</p>
+      <a class="btn" href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest/download/OnseiTekisutoPro-Mac.zip">
+        ダウンロード (.zip)
+      </a>
+    </div>
+  </div>
+
+  <section class="features">
+    <h2>できること</h2>
+    <ul>
+      <li>ホットキー1つで録音開始・停止。話した内容を今使っているアプリに自動で貼り付け</li>
+      <li>録音中はリアルタイムに文字起こし結果を表示</li>
+      <li>別のホットキーで翻訳モード。話した日本語を翻訳し、自動で読み上げ(相手にそのまま聞こえます)</li>
+      <li>ESCキーでいつでも強制停止</li>
+      <li>音声認識・文字起こしはすべて端末内で完結(外部サーバーに送信しません)</li>
+    </ul>
+  </section>
+
+  <p class="note">
+    展開(zip解凍)して中の実行ファイルを起動してください。<br>
+    Macでは初回起動時に「アクセシビリティ」「マイク」の権限許可が必要です。<br>
+    ソースコード・詳しい説明は
+    <a href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro">GitHubリポジトリ</a>
+    を見てください。
+  </p>
+</main>
+<script>
+  // OSを判定して、該当するカードを目立たせる(単なる目印。両方常に押せる)
+  var ua = navigator.userAgent;
+  var target = /Mac/.test(ua) ? "card-mac" : /Win/.test(ua) ? "card-windows" : null;
+  if (target) {
+    document.getElementById(target).classList.add("recommended");
+  }
+</script>
+</body>
+</html>
