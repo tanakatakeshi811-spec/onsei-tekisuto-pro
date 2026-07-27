@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ONsei TEkisuto Pro ダウンロード</title>
+<title>NekoVoice Pixel ダウンロード</title>
 <style>
   :root {
     --bg: #141715;
@@ -26,15 +26,15 @@
     padding: 48px 20px 80px;
   }
   main { width: 100%; max-width: 640px; }
-  .cat {
-    display: block;
-    margin: 0 auto 8px;
-  }
+  svg { display: block; }
+  svg.pixel { shape-rendering: crispEdges; }
+  .icon-wrap { display: flex; justify-content: center; margin-bottom: 6px; }
   h1 {
     text-align: center;
     color: var(--neon);
-    font-size: 1.7rem;
-    letter-spacing: 0.02em;
+    font-size: 1.9rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
     margin: 0 0 6px;
   }
   .sub {
@@ -55,7 +55,7 @@
   .card {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 4px;
     padding: 24px 18px;
     text-align: center;
     transition: border-color 0.15s ease;
@@ -64,34 +64,37 @@
     border-color: var(--neon-dim);
     box-shadow: 0 0 0 1px var(--neon-dim) inset;
   }
-  .card .os-icon { font-size: 2.2rem; margin-bottom: 8px; }
+  .card .icon-wrap { margin-bottom: 10px; }
   .card h2 { margin: 0 0 4px; font-size: 1.05rem; color: var(--text-main); }
   .card p { margin: 0 0 16px; color: var(--text-dim); font-size: 0.82rem; }
-  .badge {
-    display: inline-block;
-    font-size: 0.7rem;
-    color: var(--neon);
-    border: 1px solid var(--neon-dim);
-    border-radius: 999px;
-    padding: 2px 10px;
-    margin-bottom: 10px;
-  }
+
+  /* ドット絵のプログレスバー風ダウンロードボタン */
   .btn {
-    display: inline-block;
+    display: block;
     width: 100%;
-    padding: 10px 0;
-    border-radius: 8px;
-    background: var(--neon);
-    color: #06210f;
-    font-weight: 700;
+    padding: 12px 0;
+    border: 4px solid #0d1712;
+    box-shadow:
+      inset 2px 2px 0 rgba(255,255,255,0.18),
+      inset -2px -2px 0 rgba(0,0,0,0.45);
+    background-image:
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.32) 0 4px, rgba(0,0,0,0) 4px 8px),
+      linear-gradient(90deg, #55ff8c 0%, #55ff8c 52%, #1c8f3f 52%, #1c8f3f 78%, #123322 78%, #123322 100%);
+    color: #0a1a10;
+    font-weight: 800;
+    letter-spacing: 0.04em;
     text-decoration: none;
-    font-size: 0.92rem;
+    font-size: 0.9rem;
+    text-align: center;
+    image-rendering: pixelated;
   }
-  .btn:hover { background: #63ff92; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { filter: brightness(0.92); }
+
   section.features {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 4px;
     padding: 20px 24px;
     margin-bottom: 28px;
   }
@@ -118,30 +121,50 @@
 </head>
 <body>
 <main>
-  <svg class="cat" width="70" height="60" viewBox="0 0 76 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <ellipse cx="38" cy="36" rx="18" ry="16" stroke="#3dff6e" stroke-width="2"/>
-    <path d="M22 26 L26 10 L36 22" stroke="#3dff6e" stroke-width="2"/>
-    <path d="M54 26 L50 10 L40 22" stroke="#3dff6e" stroke-width="2"/>
-    <circle cx="32" cy="33" r="2" fill="#3dff6e"/>
-    <circle cx="44" cy="33" r="2" fill="#3dff6e"/>
-  </svg>
-  <h1>ONsei TEkisuto Pro</h1>
+  <div class="icon-wrap">
+    <!-- ネオングリーンの線画猫マスコット(アプリ本体と共通デザイン) -->
+    <svg width="70" height="60" viewBox="0 0 76 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="38" cy="36" rx="18" ry="16" stroke="#3dff6e" stroke-width="2"/>
+      <path d="M22 26 L26 10 L36 22" stroke="#3dff6e" stroke-width="2"/>
+      <path d="M54 26 L50 10 L40 22" stroke="#3dff6e" stroke-width="2"/>
+      <circle cx="32" cy="33" r="2" fill="#3dff6e"/>
+      <circle cx="44" cy="33" r="2" fill="#3dff6e"/>
+    </svg>
+  </div>
+  <h1>NekoVoice Pixel</h1>
   <p class="sub">Windows / Mac常駐の音声ディクテーション &amp; 翻訳ツール</p>
 
   <div class="cards">
     <div class="card" id="card-windows">
-      <div class="os-icon">🪟</div>
+      <div class="icon-wrap">
+        <svg class="pixel" width="48" height="48" viewBox="0 0 64 64">
+          <rect x="10" y="10" width="20" height="20" fill="#6cc0ff"/>
+          <rect x="34" y="10" width="20" height="20" fill="#3d8fe0"/>
+          <rect x="10" y="34" width="20" height="20" fill="#3d8fe0"/>
+          <rect x="34" y="34" width="20" height="20" fill="#6cc0ff"/>
+        </svg>
+      </div>
       <h2>Windows</h2>
       <p>Windows 10 / 11</p>
-      <a class="btn" href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest/download/OnseiTekisutoPro-Windows.zip">
+      <a class="btn" href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest/download/NekoVoicePixel-Windows.zip">
         ダウンロード (.zip)
       </a>
     </div>
     <div class="card" id="card-mac">
-      <div class="os-icon">🍎</div>
+      <div class="icon-wrap">
+        <svg class="pixel" width="48" height="48" viewBox="0 0 64 64">
+          <rect x="16" y="24" width="32" height="36" fill="#0d1712"/>
+          <rect x="12" y="28" width="40" height="28" fill="#0d1712"/>
+          <rect x="18" y="26" width="28" height="32" fill="#e0473c"/>
+          <rect x="14" y="30" width="36" height="24" fill="#e0473c"/>
+          <rect x="30" y="10" width="6" height="10" fill="#6b4a2f"/>
+          <rect x="36" y="6" width="8" height="6" fill="#4fbf55"/>
+          <rect x="40" y="10" width="6" height="6" fill="#4fbf55"/>
+        </svg>
+      </div>
       <h2>Mac</h2>
       <p>macOS (Intel / Apple Silicon)</p>
-      <a class="btn" href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest/download/OnseiTekisutoPro-Mac.zip">
+      <a class="btn" href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest/download/NekoVoicePixel-Mac.zip">
         ダウンロード (.zip)
       </a>
     </div>

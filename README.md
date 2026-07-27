@@ -1,4 +1,4 @@
-# ONsei TEkisuto Pro
+# NekoVoice Pixel
 
 Windows / Mac 常駐の音声ディクテーション&翻訳ツールです。
 

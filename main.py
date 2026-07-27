@@ -918,7 +918,7 @@ class App:
         self._capture_target = "hotkey"
 
         self.root = tk.Tk()
-        self.root.title("ONsei TEkisuto Pro v1.2")
+        self.root.title("NekoVoice Pixel")
         self.root.geometry("620x900")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)

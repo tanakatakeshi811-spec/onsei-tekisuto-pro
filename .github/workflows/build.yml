@@ -38,14 +38,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
       - name: PyInstallerでexe化
-        run: pyinstaller --onefile --windowed --name OnseiTekisutoPro main.py
+        run: pyinstaller --onefile --windowed --name NekoVoicePixel main.py
       - name: zipに固める
-        run: Compress-Archive -Path dist/OnseiTekisutoPro.exe -DestinationPath OnseiTekisutoPro-Windows.zip
+        run: Compress-Archive -Path dist/NekoVoicePixel.exe -DestinationPath NekoVoicePixel-Windows.zip
       - name: リリースにアップロード
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.ref_name }}" OnseiTekisutoPro-Windows.zip --repo "${{ github.repository }}" --clobber
+          gh release upload "${{ github.ref_name }}" NekoVoicePixel-Windows.zip --repo "${{ github.repository }}" --clobber
 
   build-macos:
     needs: create-release
@@ -61,13 +61,13 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
       - name: PyInstallerで.appを作成
-        run: pyinstaller --windowed --name OnseiTekisutoPro main.py
+        run: pyinstaller --windowed --name NekoVoicePixel main.py
       - name: zipに固める
         run: |
           cd dist
-          zip -r ../OnseiTekisutoPro-Mac.zip OnseiTekisutoPro.app
+          zip -r ../NekoVoicePixel-Mac.zip NekoVoicePixel.app
       - name: リリースにアップロード
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ github.ref_name }}" OnseiTekisutoPro-Mac.zip --repo "${{ github.repository }}" --clobber
+          gh release upload "${{ github.ref_name }}" NekoVoicePixel-Mac.zip --repo "${{ github.repository }}" --clobber
