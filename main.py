@@ -43,8 +43,30 @@ from pynput import keyboard as pynkb
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# PyInstallerでexe化すると、__file__はexeの場所ではなく実行時に展開される
+# 一時フォルダ(_MEIxxxxxx、終了時に消える)を指してしまう。exe化されている
+# 場合はsys.executable(exe自身の場所)を使い、config.jsonが次回起動時にも
+# 残るようにする。
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
+# 何かが起きても画面が固まったまま何も表示されない、という事態を防ぐため、
+# バックグラウンドスレッドで起きた予期しない例外はログファイルに残す。
+# --windowedビルドはコンソールが無く、エラーが完全に見えなくなるための対策。
+LOG_PATH = os.path.join(BASE_DIR, "error_log.txt")
+
+
+def _log_exception(context, exc):
+    try:
+        import traceback
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} [{context}] ---\n")
+            f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+    except Exception:
+        pass
 
 SAMPLE_RATE = 16000
 DEFAULT_CONFIG = {
@@ -54,8 +76,10 @@ DEFAULT_CONFIG = {
     # 翻訳先の言語(下の LANGUAGES のキー)
     "target_language": "英語",
     # 翻訳にローカルAI(Ollama)を使うか。
-    # OFFのときはWhisper内蔵の翻訳機能を使う(英語にしか訳せない)
-    "translate_with_ai": True,
+    # OFFのときはWhisper内蔵の翻訳機能を使う(英語にしか訳せない)。
+    # 公開配布版なのでOllama無しの環境の方が多い想定 → 既定値はOFFにして、
+    # Ollamaが入っている人だけ画面のチェックボックスからONにしてもらう。
+    "translate_with_ai": False,
     # リアルタイム表示用(速さ優先)。話している間、ここで随時文字起こしする
     "realtime_model_size": "small",
     # 確定時(F8を2回目に押した時)用。録音停止後に1回だけ流す。
@@ -682,7 +706,8 @@ def translate_with_whisper(audio, model):
             audio, task="translate", vad_filter=True,
         )
         return "".join(seg.text for seg in segments).strip(), ""
-    except Exception:
+    except Exception as e:
+        _log_exception("translate_with_whisper", e)
         return "", ""
 
 
@@ -1176,7 +1201,7 @@ class App:
         self.speak_btn.pack(side="right")
 
         self.translate_ai_var = tk.BooleanVar(
-            value=bool(self.cfg.get("translate_with_ai", True))
+            value=bool(self.cfg.get("translate_with_ai", False))
         )
         self._make_toggle(
             frame, "翻訳にAIを使う", self.translate_ai_var,
@@ -1421,15 +1446,34 @@ class App:
 
     def _start_model_load(self):
         def _load_live():
-            self.live_model = WhisperModel(
-                self.cfg.get("realtime_model_size", "small"), device="cpu", compute_type="int8",
-            )
-            self.events.put(("status", self._idle_status_text()))
+            try:
+                self.live_model = WhisperModel(
+                    self.cfg.get("realtime_model_size", "small"), device="cpu", compute_type="int8",
+                )
+                self.events.put(("status", self._idle_status_text()))
+            except Exception as e:
+                # ここで失敗すると self.live_model が None のままになり、
+                # ホットキーを押しても toggle_recording が何もせず戻ってしまう
+                # (画面が「モデル読み込み中…」のまま反応しなくなって見える)。
+                # 初回はモデルをネット経由でダウンロードするため、通信環境が
+                # 悪い/無い場合にここで失敗しやすい。
+                _log_exception("live_model load", e)
+                self.events.put((
+                    "status",
+                    "音声認識モデルの読み込みに失敗しました。"
+                    "インターネット接続を確認して再起動してください",
+                ))
 
         def _load_final():
-            self.final_model = WhisperModel(
-                self.cfg.get("final_model_size", "medium"), device="cpu", compute_type="int8",
-            )
+            try:
+                self.final_model = WhisperModel(
+                    self.cfg.get("final_model_size", "medium"), device="cpu", compute_type="int8",
+                )
+            except Exception as e:
+                _log_exception("final_model load", e)
+                # 確定用モデルが読めなくても、_finalize_workerはself.live_modelに
+                # フォールバックするので致命的ではない。ステータスだけ出す。
+                self.events.put(("status", "高精度モデルの読み込みに失敗しました(簡易モデルで動作します)"))
 
         # リアルタイム用(軽い)と確定用(精度重視)を並行して読み込む。
         # リアルタイム用が読み終わった時点でアプリは使い始められる。
@@ -1552,7 +1596,8 @@ class App:
                     audio, language="ja", vad_filter=True, beam_size=1,
                 )
                 text = "".join(seg.text for seg in segments).strip()
-            except Exception:
+            except Exception as e:
+                _log_exception("streaming transcribe", e)
                 text = None
             if text is not None:
                 self.events.put(("partial", (session, text)))
@@ -1564,7 +1609,8 @@ class App:
             if audio.size > SAMPLE_RATE * 0.2:
                 segments, _ = model.transcribe(audio, language="ja", vad_filter=True)
                 raw_text = "".join(seg.text for seg in segments).strip()
-        except Exception:
+        except Exception as e:
+            _log_exception("finalize transcribe", e)
             raw_text = ""
 
         if finalize_id in self._cancelled_finalize_ids:
@@ -1599,7 +1645,7 @@ class App:
         lang_key = self.cfg.get("target_language", "英語")
         translated, reading = "", ""
 
-        if self.cfg.get("translate_with_ai", True):
+        if self.cfg.get("translate_with_ai", False):
             self.events.put(("status", f"AIが{lang_key}に翻訳しています…"))
             translated, reading = translate_with_ai(
                 rule_based_cleanup(raw_text) or raw_text, self.cfg
@@ -1802,5 +1848,17 @@ class App:
         self.root.mainloop()
 
 
+def _thread_excepthook(args):
+    """バックグラウンドスレッドで想定外の例外が起きた時、アプリを黙って
+    固まらせるのではなくログに残す(--windowedビルドはコンソールが無いため、
+    ここで拾わないとユーザーには何も見えないまま反応しなくなる)。"""
+    _log_exception(f"unhandled in thread {args.thread.name}", args.exc_value)
+
+
 if __name__ == "__main__":
-    App().run()
+    threading.excepthook = _thread_excepthook
+    try:
+        App().run()
+    except Exception as e:
+        _log_exception("main", e)
+        raise
