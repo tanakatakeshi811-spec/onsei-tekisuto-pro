@@ -12,11 +12,19 @@
 """
 
 import collections
+import contextlib
 import ctypes
 import json
+import multiprocessing
 import os
 import re
 import sys
+
+# PyInstallerでexe化した子プロセス(faster-whisperの内部依存が使うことがある)が
+# エントリポイントを丸ごと再実行してしまい、プロセスが際限なく増殖するバグへの対策。
+# mainより前、できるだけ早い段階で呼ぶ必要がある(Mac実機での再現・原因特定は
+# しゅんりさんの協力者による報告)。
+multiprocessing.freeze_support()
 
 # Windowsで開発者モードが有効になっていない環境でも、faster-whisperが
 # モデルを初めてダウンロードするときにシンボリックリンク作成でエラーに
@@ -34,6 +42,7 @@ import numpy as np
 import pyperclip
 import requests
 import sounddevice as sd
+import speech_recognition as sr
 from faster_whisper import WhisperModel
 from pynput import keyboard as pynkb
 
@@ -42,6 +51,56 @@ from pynput import keyboard as pynkb
 #  sounddeviceでの音生成・pynput・OSごとのAPI呼び分けに置き換えている)
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
+
+if IS_MAC:
+    # macOS 26以降、キーボードレイアウト(入力ソース)を調べるHIToolboxのAPI
+    # (TSMGetInputSourceProperty等)は、メインスレッド以外から呼ぶと
+    # dispatch_assert_queueにより即座にクラッシュするようになった。
+    # pynputはキー入力の翻訳(pynput._util.darwin.keycode_context)でこのAPIを
+    # 内部のリスナースレッドから直接呼んでしまうため、起動直後に確実にクラッシュ
+    # する不具合が実機で確認された(Mac実機での再現・原因特定・修正方針の提示は
+    # しゅんりさんの協力者による報告に基づく)。
+    # 該当箇所を差し替え、実際のHIToolbox呼び出しだけをメインスレッド
+    # (Tkinterが使っているCocoaのメインループ)にディスパッチし、
+    # 呼び出し元のスレッドは完了まで待つ(同期呼び出しの形を保ったまま安全にする)。
+    try:
+        import pynput._util.darwin as _pynput_darwin
+        from PyObjCTools import AppHelper
+
+        _orig_keycode_context = _pynput_darwin.keycode_context
+
+        def _run_on_main_sync(func, timeout=5):
+            result = {}
+            done = threading.Event()
+
+            def _wrapper():
+                try:
+                    result["value"] = func()
+                except Exception as e:
+                    result["error"] = e
+                finally:
+                    done.set()
+
+            AppHelper.callAfter(_wrapper)
+            if not done.wait(timeout=timeout):
+                raise RuntimeError("keycode_context: メインスレッドへの処理委譲がタイムアウトしました")
+            if "error" in result:
+                raise result["error"]
+            return result.get("value")
+
+        @contextlib.contextmanager
+        def _main_thread_keycode_context():
+            cm = _orig_keycode_context()
+            ctx = _run_on_main_sync(cm.__enter__)
+            try:
+                yield ctx
+            finally:
+                _run_on_main_sync(lambda: cm.__exit__(None, None, None))
+
+        _pynput_darwin.keycode_context = _main_thread_keycode_context
+    except Exception as e:
+        # ここが失敗しても致命的ではない(パッチが当たらないだけ、元の挙動に戻る)
+        pass
 
 # PyInstallerでexe化すると、__file__はexeの場所ではなく実行時に展開される
 # 一時フォルダ(_MEIxxxxxx、終了時に消える)を指してしまう。exe化されている
@@ -95,6 +154,10 @@ DEFAULT_CONFIG = {
     "llm_cleanup_enabled": False,
     "llm_model": "gemma3:4b",
     "llm_base_url": "http://127.0.0.1:11434",
+    # 確定時の文字起こしにGoogle音声認識(要ネット接続、音声がGoogleに送信される)を
+    # 使うか。既定はOFF(faster-whisperのみで端末内完結)。ONにすると精度が上がる
+    # 場面がある一方、外部送信を伴うためユーザーの明示的なON操作を必要とする。
+    "use_google_stt": False,
 }
 
 # 翻訳できる言語。tts_culture はOS標準の読み上げ音声(Windows: System.Speech、
@@ -698,6 +761,34 @@ def translate_with_ai(text, cfg):
         return "", ""
 
 
+def whisper_transcribe(model, audio):
+    """faster-whisperでの文字起こし(端末内で完結)。失敗時は空文字を返す。"""
+    try:
+        if audio.size > SAMPLE_RATE * 0.2:
+            segments, _ = model.transcribe(audio, language="ja", vad_filter=True)
+            return "".join(seg.text for seg in segments).strip()
+    except Exception as e:
+        _log_exception("whisper_transcribe", e)
+    return ""
+
+
+def transcribe_with_google(audio):
+    """Google音声認識(要ネット接続、録音した音声がGoogleのサーバーに送信される)。
+    faster-whisperより認識精度が良い場面がある代わりに、外部送信を伴う代替エンジン。
+    失敗(ネット無し・無音・タイムアウト等)した場合はNoneを返す
+    (呼び出し側でfaster-whisperにフォールバックする)。"""
+    try:
+        pcm16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        audio_data = sr.AudioData(pcm16, SAMPLE_RATE, 2)
+        recognizer = sr.Recognizer()
+        return recognizer.recognize_google(audio_data, language="ja-JP")
+    except sr.UnknownValueError:
+        return None
+    except Exception as e:
+        _log_exception("transcribe_with_google", e)
+        return None
+
+
 def translate_with_whisper(audio, model):
     """Whisperに元から付いている翻訳機能を使う。
     ローカルAIより軽いが、英語にしか訳せないのが弱点。"""
@@ -944,7 +1035,7 @@ class App:
 
         self.root = tk.Tk()
         self.root.title("NekoVoice Pixel")
-        self.root.geometry("620x900")
+        self.root.geometry("620x940")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
 
@@ -1155,6 +1246,21 @@ class App:
         ).pack(anchor="w", padx=(20, 0))
         self._update_llm_hint()
 
+        # 確定時の文字起こしエンジンをGoogleに切り替えるトグル(代替エンジン)
+        self.google_stt_var = tk.BooleanVar(
+            value=bool(self.cfg.get("use_google_stt", False))
+        )
+        self._make_toggle(
+            frame, "Google音声認識を使う", self.google_stt_var,
+            self.toggle_google_stt, BG,
+        ).pack(anchor="w", pady=(4, 0))
+        self.google_stt_hint_var = tk.StringVar()
+        tk.Label(
+            frame, textvariable=self.google_stt_hint_var, font=("Meiryo", 8),
+            bg=BG, fg=TEXT_DIM, anchor="w", justify="left", wraplength=560,
+        ).pack(anchor="w", padx=(20, 0))
+        self._update_google_stt_hint()
+
     # --- 翻訳モードの操作列 ---
     def _build_translate_row(self):
         frame = tk.Frame(self.root, bg=PANEL, highlightthickness=1,
@@ -1286,6 +1392,17 @@ class App:
                 "OFF: 句読点と数字だけ整えます(すぐ確定します)"
             )
 
+    def _update_google_stt_hint(self):
+        if self.google_stt_var.get():
+            self.google_stt_hint_var.set(
+                "ON: 確定時にGoogle音声認識を使います"
+                "(要ネット接続。音声がGoogleに送信されます。失敗時は自動でこのPC内の認識に戻ります)"
+            )
+        else:
+            self.google_stt_hint_var.set(
+                "OFF: 全てこのPC内で完結するfaster-whisperのみ使います"
+            )
+
     def _update_translate_hint(self):
         lang = self.lang_var.get()
         key = self.cfg.get("translate_hotkey", "f7").upper()
@@ -1311,6 +1428,15 @@ class App:
             self.status_var.set(f"設定の保存に失敗: {e}")
             return
         self._update_llm_hint()
+
+    def toggle_google_stt(self):
+        self.cfg["use_google_stt"] = bool(self.google_stt_var.get())
+        try:
+            save_config(self.cfg)
+        except Exception as e:
+            self.status_var.set(f"設定の保存に失敗: {e}")
+            return
+        self._update_google_stt_hint()
 
     def toggle_translate_ai(self):
         self.cfg["translate_with_ai"] = bool(self.translate_ai_var.get())
@@ -1605,13 +1731,15 @@ class App:
     def _finalize_worker(self, audio, foreground_id, finalize_id, mode):
         model = self.final_model if self.final_model is not None else self.live_model
         raw_text = ""
-        try:
-            if audio.size > SAMPLE_RATE * 0.2:
-                segments, _ = model.transcribe(audio, language="ja", vad_filter=True)
-                raw_text = "".join(seg.text for seg in segments).strip()
-        except Exception as e:
-            _log_exception("finalize transcribe", e)
-            raw_text = ""
+        if self.cfg.get("use_google_stt", False):
+            self.events.put(("status", "Google音声認識で確認しています…"))
+            raw_text = transcribe_with_google(audio) or ""
+            if not raw_text:
+                # ネット無し・タイムアウト等で失敗した場合は、
+                # 端末内で完結するfaster-whisperにフォールバックする
+                raw_text = whisper_transcribe(model, audio)
+        else:
+            raw_text = whisper_transcribe(model, audio)
 
         if finalize_id in self._cancelled_finalize_ids:
             return

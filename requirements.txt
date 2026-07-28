@@ -4,4 +4,5 @@ numpy
 pyperclip
 pynput
 requests
+SpeechRecognition
 pyobjc-framework-Cocoa; sys_platform == "darwin"
