@@ -197,8 +197,12 @@ BORDER = "#2f3a33"
 
 # 波形の下に出すスペクトラム(音の高さごとの強さ)の帯の本数
 SPECTRUM_BANDS = 28
-WAVE_W, WAVE_H = 500, 260      # 波形エリアの大きさ
+WAVE_W, WAVE_H = 500, 190      # 波形エリアの大きさ
 METER_W = 96                   # 右側のレベルメーターの幅
+
+# 通常表示/コンパクト表示、それぞれのウィンドウサイズ
+WINDOW_W, WINDOW_H = 620, 800
+COMPACT_W, COMPACT_H = 260, 64
 
 
 def _spec_color(t):
@@ -1121,9 +1125,11 @@ class App:
         self._last_raw_text = ""
         self._last_final_text = ""
 
+        self.compact_mode = False
+
         self.root = tk.Tk()
         self.root.title("NekoVoice Pixel")
-        self.root.geometry("620x940")
+        self.root.geometry(f"{WINDOW_W}x{WINDOW_H}")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
         self._set_window_icon()
@@ -1160,6 +1166,11 @@ class App:
         self.root.configure(bg=BG)
         self._setup_ttk_style()
 
+        # 通常表示一式をまとめて1つのフレームに入れておくことで、
+        # コンパクト表示への切り替え(pack_forget/pack)を1回で済ませる
+        self.normal_view = tk.Frame(self.root, bg=BG)
+        self.normal_view.pack(fill="both", expand=True)
+
         self._build_menubar()
         self._build_toolbar()
         self._build_wave_area()
@@ -1168,6 +1179,7 @@ class App:
         self._build_history_view()
         self._build_translate_row()
         self._build_bottom_row()
+        self._build_compact_view()
 
     def _make_toggle(self, parent, text, variable, command, bg):
         """ON/OFFがひと目で分かる自前のチェックボックス。
@@ -1223,7 +1235,7 @@ class App:
 
     # --- メニューバー風の帯(見た目のための飾り) ---
     def _build_menubar(self):
-        bar = tk.Frame(self.root, bg=PANEL, height=26)
+        bar = tk.Frame(self.normal_view, bg=PANEL, height=26)
         bar.pack(fill="x")
         for name in ("File", "Edit", "View", "Help"):
             tk.Label(
@@ -1233,7 +1245,7 @@ class App:
 
     # --- 再生/一時停止/録音ボタンと音量メーターの帯 ---
     def _build_toolbar(self):
-        bar = tk.Frame(self.root, bg=PANEL, height=46)
+        bar = tk.Frame(self.normal_view, bg=PANEL, height=46)
         bar.pack(fill="x")
 
         left = tk.Frame(bar, bg=PANEL)
@@ -1261,6 +1273,9 @@ class App:
         self.dict_btn = self._round_button(
             center, "辞", NEON, lambda e: self.open_dictionary_dialog()
         )
+        self.compact_btn = self._round_button(
+            center, "小", NEON, lambda e: self.toggle_compact_mode()
+        )
 
         right = tk.Frame(bar, bg=PANEL)
         right.pack(side="right", padx=(0, 12))
@@ -1285,8 +1300,8 @@ class App:
 
     # --- 波形 + スペクトラム + 右のレベルメーター ---
     def _build_wave_area(self):
-        area = tk.Frame(self.root, bg=BG)
-        area.pack(fill="x", padx=10, pady=(8, 0))
+        area = tk.Frame(self.normal_view, bg=BG)
+        area.pack(fill="x", padx=10, pady=(5, 0))
 
         self.canvas = tk.Canvas(
             area, width=WAVE_W, height=WAVE_H, bg=PANEL_DARK,
@@ -1305,7 +1320,7 @@ class App:
 
     # --- 「CH 1-D」やズーム表示の帯(見た目のための飾り) ---
     def _build_wave_footer(self):
-        bar = tk.Frame(self.root, bg=BG)
+        bar = tk.Frame(self.normal_view, bg=BG)
         bar.pack(fill="x", padx=10, pady=(4, 0))
 
         self.time_var = tk.StringVar(value="00:00:00")
@@ -1325,8 +1340,8 @@ class App:
         # main_view_frame/history_view_frameは同じ場所に交互に表示する
         # (履歴ボタン/戻るボタンで切り替える。 _view_pack_opts に元のpack引数を
         # 保存しておき、履歴表示から戻る時に同じ位置へ戻せるようにしている)
-        self._view_pack_opts = dict(fill="both", expand=True, padx=10, pady=(8, 0))
-        frame = tk.Frame(self.root, bg=BG)
+        self._view_pack_opts = dict(fill="both", expand=True, padx=10, pady=(5, 0))
+        frame = tk.Frame(self.normal_view, bg=BG)
         self.main_view_frame = frame
         frame.pack(**self._view_pack_opts)
 
@@ -1339,7 +1354,7 @@ class App:
                  bg=BG, fg=TEXT_DIM).pack(side="right")
 
         self.text_box = tk.Text(
-            frame, height=6, wrap="word", font=("Meiryo", 11),
+            frame, height=5, wrap="word", font=("Meiryo", 11),
             bg=PANEL_DARK, fg=NEON, insertbackground=NEON,
             bd=0, highlightthickness=1, highlightbackground=NEON_DIM,
             highlightcolor=NEON, padx=8, pady=6,
@@ -1380,7 +1395,7 @@ class App:
 
     # --- 履歴画面(main_view_frameと同じ場所に交互に表示する) ---
     def _build_history_view(self):
-        frame = tk.Frame(self.root, bg=BG)
+        frame = tk.Frame(self.normal_view, bg=BG)
         self.history_view_frame = frame
         # 最初は非表示(main_view_frameが表示された状態で起動する)
 
@@ -1418,6 +1433,39 @@ class App:
     def show_main_view(self):
         self.history_view_frame.pack_forget()
         self.main_view_frame.pack(**self._view_pack_opts)
+
+    # --- コンパクト表示(小さいインジケータ+状態文字だけの最小表示) ---
+    def _build_compact_view(self):
+        frame = tk.Frame(self.root, bg=BG, cursor="hand2")
+        self.compact_view_frame = frame
+        # 最初は非表示(通常表示のnormal_viewが表示された状態で起動する)
+
+        inner = tk.Frame(frame, bg=BG)
+        inner.pack(expand=True)
+        self.compact_indicator = tk.Canvas(
+            inner, width=16, height=16, bg=BG, highlightthickness=0,
+        )
+        self.compact_indicator.pack(side="left", padx=(0, 8))
+        self._draw_compact_indicator(idle=True)
+        tk.Label(
+            inner, textvariable=self.status_var, font=("Meiryo", 10, "bold"),
+            bg=BG, fg=NEON,
+        ).pack(side="left")
+
+        # クリックでいつでも通常表示に戻せるようにする(見た目全体をボタン化)
+        for widget in (frame, inner, *inner.winfo_children()):
+            widget.bind("<Button-1>", lambda e: self.toggle_compact_mode())
+
+    def toggle_compact_mode(self):
+        self.compact_mode = not self.compact_mode
+        if self.compact_mode:
+            self.normal_view.pack_forget()
+            self.compact_view_frame.pack(fill="both", expand=True)
+            self.root.geometry(f"{COMPACT_W}x{COMPACT_H}")
+        else:
+            self.compact_view_frame.pack_forget()
+            self.normal_view.pack(fill="both", expand=True)
+            self.root.geometry(f"{WINDOW_W}x{WINDOW_H}")
 
     def _prune_history(self):
         cutoff = time.time() - 3600
@@ -1603,9 +1651,9 @@ class App:
 
     # --- 翻訳モードの操作列 ---
     def _build_translate_row(self):
-        frame = tk.Frame(self.root, bg=PANEL, highlightthickness=1,
+        frame = tk.Frame(self.normal_view, bg=PANEL, highlightthickness=1,
                          highlightbackground=BORDER)
-        frame.pack(fill="x", padx=10, pady=(8, 0))
+        frame.pack(fill="x", padx=10, pady=(5, 0))
 
         row1 = tk.Frame(frame, bg=PANEL)
         row1.pack(fill="x", padx=8, pady=(6, 0))
@@ -1663,8 +1711,8 @@ class App:
 
     # --- 猫・マイク・ホットキー(元のレイアウトのまま) ---
     def _build_bottom_row(self):
-        bottom = tk.Frame(self.root, bg=BG)
-        bottom.pack(fill="x", padx=16, pady=(8, 12))
+        bottom = tk.Frame(self.normal_view, bg=BG)
+        bottom.pack(fill="x", padx=16, pady=(5, 8))
 
         cat = tk.Canvas(bottom, width=76, height=64, bg=BG, highlightthickness=0)
         cat.pack(side="left")
@@ -1840,6 +1888,16 @@ class App:
                                    style="arc", outline=color, width=2)
         self.mic_canvas.create_line(27, 44, 27, 50, fill=color, width=2)
         self.mic_canvas.create_line(18, 50, 36, 50, fill=color, width=2)
+        self._draw_compact_indicator(idle)
+
+    def _draw_compact_indicator(self, idle=True):
+        """コンパクト表示の小さい丸インジケータ(緑=待機中/赤=録音中)"""
+        canvas = getattr(self, "compact_indicator", None)
+        if canvas is None:
+            return
+        canvas.delete("all")
+        color = NEON if idle else REC_RED
+        canvas.create_oval(2, 2, 14, 14, outline=color, fill=color)
 
     def _draw_volume_bars(self, level):
         c = self.vol_canvas
