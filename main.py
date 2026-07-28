@@ -1361,6 +1361,17 @@ class App:
         stop_lbl.pack(pady=(4, 0))
         stop_lbl.bind("<Button-1>", lambda e: self.force_stop())
 
+        if IS_MAC:
+            # ホットキー・自動貼り付けはmacOSの「アクセシビリティ」権限が無いと
+            # 一切反応しない(エラーも出ずに黙って効かないだけなので、
+            # 初回起動時にここで案内しておく)
+            tk.Label(
+                right,
+                text="初回のみ: システム設定→プライバシーとセキュリティ→\n"
+                     "アクセシビリティ でこのアプリを許可してください",
+                font=("Meiryo", 8), bg=BG, fg=TEXT_DIM, justify="right",
+            ).pack(pady=(4, 0))
+
     def _draw_cat(self, c):
         """左下の猫マスコット(ネオングリーンの線画)"""
         n = NEON
