@@ -40,8 +40,16 @@
   .sub {
     text-align: center;
     color: var(--text-dim);
-    margin-bottom: 36px;
+    margin-bottom: 8px;
     font-size: 0.95rem;
+  }
+  .version-badge {
+    display: block;
+    text-align: center;
+    color: var(--neon-dim);
+    font-size: 0.78rem;
+    margin-bottom: 36px;
+    font-variant-numeric: tabular-nums;
   }
   .cards {
     display: grid;
@@ -133,6 +141,7 @@
   </div>
   <h1>NekoVoice Pixel</h1>
   <p class="sub">Windows / Mac常駐の音声ディクテーション &amp; 翻訳ツール</p>
+  <span class="version-badge" id="version-badge"></span>
 
   <div class="cards">
     <div class="card" id="card-windows">
@@ -186,7 +195,10 @@
     Macでは初回起動時に「アクセシビリティ」「マイク」の権限許可が必要です。<br>
     ソースコード・詳しい説明は
     <a href="https://github.com/tanakatakeshi811-spec/onsei-tekisuto-pro">GitHubリポジトリ</a>
-    を見てください。
+    を見てください。<br>
+    ご感想・不具合報告は
+    <a href="mailto:tanakatakeshi811@gmail.com?subject=NekoVoice%20Pixel%20フィードバック">tanakatakeshi811@gmail.com</a>
+    まで気軽にどうぞ。
   </p>
 </main>
 <script>
@@ -196,6 +208,16 @@
   if (target) {
     document.getElementById(target).classList.add("recommended");
   }
+
+  // 最新バージョン番号をGitHubから取得して表示する(サイト側は更新不要)
+  fetch("https://api.github.com/repos/tanakatakeshi811-spec/onsei-tekisuto-pro/releases/latest")
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (data && data.tag_name) {
+        document.getElementById("version-badge").textContent = "最新バージョン: " + data.tag_name;
+      }
+    })
+    .catch(function () { /* 取得失敗時は何も表示しない */ });
 </script>
 </body>
 </html>
