@@ -41,7 +41,7 @@ jobs:
         # --collect-data faster_whisper が無いとVADモデル(silero_vad_v6.onnx)が、
         # --collect-data speech_recognition が無いとFLAC変換用のバンドル実行ファイルが
         # 同梱されず、どちらも文字起こしのたびに静かに失敗する(実際に踏んだ不具合)
-        run: pyinstaller --onefile --windowed --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
+        run: pyinstaller --onefile --windowed --icon=assets/icon.ico --add-data "assets;assets" --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
       - name: zipに固める
         run: Compress-Archive -Path dist/NekoVoicePixel.exe -DestinationPath NekoVoicePixel-Windows.zip
       - name: リリースにアップロード
@@ -67,7 +67,7 @@ jobs:
         # --collect-data faster_whisper が無いとVADモデル(silero_vad_v6.onnx)が、
         # --collect-data speech_recognition が無いとFLAC変換用のバンドル実行ファイルが
         # 同梱されず、どちらも文字起こしのたびに静かに失敗する(実際に踏んだ不具合)
-        run: pyinstaller --windowed --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
+        run: pyinstaller --windowed --icon=assets/icon.icns --add-data "assets:assets" --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
       - name: zipに固める
         run: |
           cd dist

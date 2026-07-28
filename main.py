@@ -14,6 +14,7 @@
 import collections
 import contextlib
 import ctypes
+import difflib
 import json
 import multiprocessing
 import os
@@ -112,6 +113,16 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
+# 同梱リソース(アイコン画像など)の場所。config.json/error_log.txtと違い、
+# こちらは「exeに埋め込まれたファイルの取り出し先」なのでBASE_DIRとは別に
+# 一時展開フォルダ(sys._MEIPASS)を見る必要がある。
+if getattr(sys, "frozen", False):
+    RESOURCE_DIR = getattr(sys, "_MEIPASS", BASE_DIR)
+else:
+    RESOURCE_DIR = BASE_DIR
+ICON_PNG_PATH = os.path.join(RESOURCE_DIR, "assets", "icon.png")
+ICON_ICO_PATH = os.path.join(RESOURCE_DIR, "assets", "icon.ico")
+
 # 何かが起きても画面が固まったまま何も表示されない、という事態を防ぐため、
 # バックグラウンドスレッドで起きた予期しない例外はログファイルに残す。
 # --windowedビルドはコンソールが無く、エラーが完全に見えなくなるための対策。
@@ -158,6 +169,10 @@ DEFAULT_CONFIG = {
     # 使うか。既定はOFF(faster-whisperのみで端末内完結)。ONにすると精度が上がる
     # 場面がある一方、外部送信を伴うためユーザーの明示的なON操作を必要とする。
     "use_google_stt": False,
+    # 表記のゆらぎ(誤変換)を、この一覧に登録した単語に自動で寄せるための辞書。
+    # 「辞書」ボタンから手動登録、または確定後にテキストを直接書き換えると
+    # 変更箇所が自動でも登録される。
+    "custom_dictionary": [],
 }
 
 # 翻訳できる言語。tts_culture はOS標準の読み上げ音声(Windows: System.Speech、
@@ -761,6 +776,72 @@ def translate_with_ai(text, cfg):
         return "", ""
 
 
+def apply_custom_dictionary(text, dictionary):
+    """辞書に登録された単語に、認識結果の似ている部分文字列を寄せる。
+    辞書の各エントリは{"term": 正しい表記, "reading": 読み方(ひらがな、省略可)}。
+    日本語は分かち書きされていないため単語境界が取れず、「登録した単語(と、
+    あれば読み方)とだいたい同じ長さの部分文字列」を総当たりで比較して
+    一番近いものを置き換える簡易的な方式にしている。
+
+    注意: 文字の見た目(形)だけを比較しているため、例えば「田中武」という
+    表記と「たなかたけし」というひらがな読みは、文字としては別物(0%近い
+    一致度)になってしまい、読み方を登録していないと拾えない。ひらがな/
+    カタカナの読み違いを直したい場合は、辞書登録時に読み方も入力してもらう
+    ことで対応している。"""
+    if not dictionary or not text:
+        return text
+    entries = sorted(dictionary, key=lambda e: len(e.get("term", "")), reverse=True)
+    for entry in entries:
+        term = entry.get("term", "")
+        if not term or term in text:
+            continue
+        candidates = [term]
+        reading = entry.get("reading", "")
+        if reading and reading not in candidates:
+            candidates.append(reading)
+
+        best_ratio, best_span = 0.0, None
+        for cand in candidates:
+            n = len(cand)
+            for start in range(0, len(text)):
+                for length in (n - 1, n, n + 1):
+                    if length < 1 or start + length > len(text):
+                        continue
+                    window = text[start:start + length]
+                    ratio = difflib.SequenceMatcher(None, window, cand).ratio()
+                    if length != n:
+                        # 短い(あるいは長い)部分文字列ほど一致率が水増しされやすい
+                        # (例: 「田中武」に対して「田中」だけの方が「田中猛」より
+                        # 一致率が高く出てしまい、本来置き換えるべき範囲より
+                        # 短い範囲を選んで文字が中途半端に残るバグがあった)。
+                        # 同じ長さでの一致を優先するため、長さが違う場合は
+                        # ペナルティを引いて素の一致率だけで勝たないようにする。
+                        ratio -= 0.15
+                    if ratio > best_ratio:
+                        best_ratio, best_span = ratio, (start, start + length)
+        if best_span and best_ratio >= 0.6:
+            s, e = best_span
+            text = text[:s] + term + text[e:]
+    return text
+
+
+def extract_dictionary_candidates(original, edited, max_len=20):
+    """確定直後の文字起こし結果(original)から、ユーザーが手で書き換えた後の
+    文章(edited)への差分のうち、書き換えられた・追加された部分だけを取り出す。
+    分かち書きされていない日本語が相手なので、単語単位ではなく
+    「変更された文字列のかたまり」をそのまま辞書候補として扱う簡易的な方式。"""
+    if not original or not edited or original == edited:
+        return []
+    matcher = difflib.SequenceMatcher(None, original, edited)
+    candidates = []
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "insert"):
+            chunk = edited[j1:j2].strip()
+            if chunk and len(chunk) <= max_len:
+                candidates.append(chunk)
+    return candidates
+
+
 def whisper_transcribe(model, audio):
     """faster-whisperでの文字起こし(端末内で完結)。失敗時は空文字を返す。"""
     try:
@@ -1032,12 +1113,20 @@ class App:
         # 読み上げ中のPowerShellプロセス(ESCで即座にterminateして黙らせる用)
         self._tts_proc = None
         self._capture_target = "hotkey"
+        # 履歴(過去1時間の確定結果)。{"time","text","mode"}のリスト
+        self.history = []
+        # 辞書の自動登録用: 直前の確定における「生の文字起こし結果」と
+        # 「実際に表示された文字列」。テキスト欄が手で書き換えられた時、
+        # この2つを比較して差分を辞書候補として拾う
+        self._last_raw_text = ""
+        self._last_final_text = ""
 
         self.root = tk.Tk()
         self.root.title("NekoVoice Pixel")
         self.root.geometry("620x940")
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
+        self._set_window_icon()
 
         self._build_ui()
         self.root.update_idletasks()
@@ -1051,6 +1140,20 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(50, self._poll)
 
+    def _set_window_icon(self):
+        """ウィンドウ左上・タスクバー等のアイコンを設定する。
+        exe自体のアイコン(タスクバー・エクスプローラー表示用)はPyInstallerの
+        --icon で埋め込み済みなので、ここではTkinterウィンドウ自体が使う
+        アイコン(ウィンドウ左上など)だけを設定すればよい。"""
+        try:
+            if IS_WINDOWS and os.path.exists(ICON_ICO_PATH):
+                self.root.iconbitmap(ICON_ICO_PATH)
+            elif os.path.exists(ICON_PNG_PATH):
+                self._icon_image = tk.PhotoImage(file=ICON_PNG_PATH)
+                self.root.iconphoto(True, self._icon_image)
+        except Exception as e:
+            _log_exception("_set_window_icon", e)
+
     # ---------- UI ----------
 
     def _build_ui(self):
@@ -1062,6 +1165,7 @@ class App:
         self._build_wave_area()
         self._build_wave_footer()
         self._build_text_area()
+        self._build_history_view()
         self._build_translate_row()
         self._build_bottom_row()
 
@@ -1151,6 +1255,12 @@ class App:
         self.stop_btn = self._round_button(
             center, "■", REC_RED, lambda e: self.force_stop()
         )
+        self.history_btn = self._round_button(
+            center, "履", NEON, lambda e: self.show_history_view()
+        )
+        self.dict_btn = self._round_button(
+            center, "辞", NEON, lambda e: self.open_dictionary_dialog()
+        )
 
         right = tk.Frame(bar, bg=PANEL)
         right.pack(side="right", padx=(0, 12))
@@ -1212,14 +1322,19 @@ class App:
 
     # --- 音声テキスト欄 ---
     def _build_text_area(self):
+        # main_view_frame/history_view_frameは同じ場所に交互に表示する
+        # (履歴ボタン/戻るボタンで切り替える。 _view_pack_opts に元のpack引数を
+        # 保存しておき、履歴表示から戻る時に同じ位置へ戻せるようにしている)
+        self._view_pack_opts = dict(fill="both", expand=True, padx=10, pady=(8, 0))
         frame = tk.Frame(self.root, bg=BG)
-        frame.pack(fill="both", expand=True, padx=10, pady=(8, 0))
+        self.main_view_frame = frame
+        frame.pack(**self._view_pack_opts)
 
-        self.status_var = tk.StringVar(value="モデル読み込み中…")
         head = tk.Frame(frame, bg=BG)
         head.pack(fill="x")
         tk.Label(head, text="音声テキスト", font=("Meiryo", 10, "bold"),
                  bg=BG, fg=NEON).pack(side="left")
+        self.status_var = tk.StringVar(value="モデル読み込み中…")
         tk.Label(head, textvariable=self.status_var, font=("Meiryo", 8),
                  bg=BG, fg=TEXT_DIM).pack(side="right")
 
@@ -1260,6 +1375,231 @@ class App:
             bg=BG, fg=TEXT_DIM, anchor="w", justify="left", wraplength=560,
         ).pack(anchor="w", padx=(20, 0))
         self._update_google_stt_hint()
+
+        self.text_box.bind("<FocusOut>", self._on_text_box_edited)
+
+    # --- 履歴画面(main_view_frameと同じ場所に交互に表示する) ---
+    def _build_history_view(self):
+        frame = tk.Frame(self.root, bg=BG)
+        self.history_view_frame = frame
+        # 最初は非表示(main_view_frameが表示された状態で起動する)
+
+        head = tk.Frame(frame, bg=BG)
+        head.pack(fill="x")
+        tk.Button(
+            head, text="← 戻る", font=("Meiryo", 9), bg=PANEL_DARK, fg=TEXT_MAIN,
+            activebackground=NEON_FAINT, activeforeground=NEON, bd=0,
+            highlightthickness=1, padx=8, command=self.show_main_view,
+        ).pack(side="left")
+        tk.Label(head, text="履歴(過去1時間)", font=("Meiryo", 10, "bold"),
+                 bg=BG, fg=NEON).pack(side="left", padx=(10, 0))
+
+        # スクロール可能な履歴一覧(Canvas+内側Frame方式)
+        outer = tk.Frame(frame, bg=BG, highlightthickness=1, highlightbackground=NEON_DIM)
+        outer.pack(fill="both", expand=True, pady=(6, 0))
+        canvas = tk.Canvas(outer, bg=PANEL_DARK, highlightthickness=0)
+        scrollbar = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        self.history_rows_frame = tk.Frame(canvas, bg=PANEL_DARK)
+        self.history_rows_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=self.history_rows_frame, anchor="nw", width=560)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def show_history_view(self):
+        self._prune_history()
+        self._rebuild_history_rows()
+        self.main_view_frame.pack_forget()
+        self.history_view_frame.pack(**self._view_pack_opts)
+
+    def show_main_view(self):
+        self.history_view_frame.pack_forget()
+        self.main_view_frame.pack(**self._view_pack_opts)
+
+    def _prune_history(self):
+        cutoff = time.time() - 3600
+        self.history = [h for h in self.history if h["time"] >= cutoff]
+
+    def _rebuild_history_rows(self):
+        for child in self.history_rows_frame.winfo_children():
+            child.destroy()
+        if not self.history:
+            tk.Label(
+                self.history_rows_frame, text="過去1時間の履歴はまだありません",
+                font=("Meiryo", 9), bg=PANEL_DARK, fg=TEXT_DIM,
+            ).pack(anchor="w", padx=8, pady=8)
+            return
+        # 新しいものが上に来る順で表示する
+        for entry in reversed(self.history):
+            self._add_history_row(entry)
+
+    def _add_history_row(self, entry):
+        row = tk.Frame(self.history_rows_frame, bg=PANEL_DARK, highlightthickness=1,
+                       highlightbackground=BORDER)
+        row.pack(fill="x", padx=6, pady=3)
+
+        label_text = time.strftime("%H:%M", time.localtime(entry["time"]))
+        if entry.get("mode") == "translate":
+            label_text += " [翻訳]"
+        tk.Label(
+            row, text=label_text, font=("Meiryo", 8), bg=PANEL_DARK, fg=TEXT_DIM,
+        ).pack(anchor="w", padx=6, pady=(4, 0))
+        tk.Label(
+            row, text=entry["text"], font=("Meiryo", 10), bg=PANEL_DARK, fg=NEON,
+            justify="left", wraplength=480, anchor="w",
+        ).pack(anchor="w", padx=6, pady=(0, 4), fill="x")
+
+        def _delete():
+            if entry in self.history:
+                self.history.remove(entry)
+            row.destroy()
+            if not self.history_rows_frame.winfo_children():
+                self._rebuild_history_rows()
+
+        tk.Button(
+            row, text="✕ 削除", font=("Meiryo", 8), bg=PANEL_DARK, fg=REC_RED,
+            activebackground=NEON_FAINT, activeforeground=REC_RED, bd=0,
+            highlightthickness=0, command=_delete,
+        ).pack(anchor="e", padx=6, pady=(0, 4))
+
+    def _add_to_history(self, text, mode):
+        if not text:
+            return
+        self.history.append({"time": time.time(), "text": text, "mode": mode})
+        self._prune_history()
+
+    # --- 単語辞書(表記のゆらぎを登録した単語に自動で寄せる) ---
+    def open_dictionary_dialog(self):
+        win = tk.Toplevel(self.root)
+        win.title("辞書")
+        win.configure(bg=BG)
+        win.geometry("360x460")
+        win.resizable(False, False)
+
+        tk.Label(
+            win, text="登録した単語は、認識結果の似ている部分をこの表記に\n"
+                       "自動で寄せます。確定後にテキストを直接書き換えると、\n"
+                       "変更した箇所が自動でも登録されます(読み方は空で登録)。\n"
+                       "ひらがなの読み間違いも直したい場合は、読み方も入力して\n"
+                       "登録してください(例: 田中武/たなかたけし)。",
+            font=("Meiryo", 9), bg=BG, fg=TEXT_DIM, justify="left",
+        ).pack(anchor="w", padx=10, pady=(10, 4))
+
+        list_frame = tk.Frame(win, bg=BG)
+        list_frame.pack(fill="both", expand=True, padx=10)
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+        listbox = tk.Listbox(
+            list_frame, font=("Meiryo", 10), bg=PANEL_DARK, fg=NEON,
+            selectbackground=NEON_FAINT, selectforeground=NEON,
+            yscrollcommand=scrollbar.set, highlightthickness=1,
+            highlightbackground=NEON_DIM, bd=0,
+        )
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        def refresh():
+            listbox.delete(0, "end")
+            for e in self.cfg.get("custom_dictionary", []):
+                term, reading = e.get("term", ""), e.get("reading", "")
+                listbox.insert("end", f"{term}({reading})" if reading else term)
+
+        refresh()
+
+        entry_frame = tk.Frame(win, bg=BG)
+        entry_frame.pack(fill="x", padx=10, pady=8)
+        term_var = tk.StringVar()
+        term_entry = tk.Entry(
+            entry_frame, textvariable=term_var, font=("Meiryo", 10),
+            bg=PANEL_DARK, fg=NEON, insertbackground=NEON, bd=0,
+            highlightthickness=1, highlightbackground=NEON_DIM,
+        )
+        term_entry.pack(fill="x", ipady=4)
+        tk.Label(
+            entry_frame, text="↑正しい表記 / ↓読み方(ひらがな、省略可)",
+            font=("Meiryo", 7), bg=BG, fg=TEXT_DIM,
+        ).pack(anchor="w", pady=(2, 2))
+        reading_var = tk.StringVar()
+        reading_row = tk.Frame(entry_frame, bg=BG)
+        reading_row.pack(fill="x")
+        reading_entry = tk.Entry(
+            reading_row, textvariable=reading_var, font=("Meiryo", 10),
+            bg=PANEL_DARK, fg=NEON, insertbackground=NEON, bd=0,
+            highlightthickness=1, highlightbackground=NEON_DIM,
+        )
+        reading_entry.pack(side="left", fill="x", expand=True, ipady=4)
+
+        def add_word():
+            term = term_var.get().strip()
+            reading = reading_var.get().strip()
+            if not term:
+                return
+            dictionary = self.cfg.setdefault("custom_dictionary", [])
+            if not any(e.get("term") == term for e in dictionary):
+                dictionary.append({"term": term, "reading": reading})
+                try:
+                    save_config(self.cfg)
+                except Exception as e:
+                    self.status_var.set(f"設定の保存に失敗: {e}")
+                refresh()
+            term_var.set("")
+            reading_var.set("")
+
+        tk.Button(
+            reading_row, text="追加", font=("Meiryo", 9), bg=PANEL_DARK, fg=TEXT_MAIN,
+            activebackground=NEON_FAINT, activeforeground=NEON, bd=0,
+            highlightthickness=1, padx=8, command=add_word,
+        ).pack(side="left", padx=(6, 0))
+        term_entry.bind("<Return>", lambda e: reading_entry.focus_set())
+        reading_entry.bind("<Return>", lambda e: add_word())
+
+        def delete_selected():
+            sel = listbox.curselection()
+            if not sel:
+                return
+            dictionary = self.cfg.get("custom_dictionary", [])
+            if sel[0] < len(dictionary):
+                del dictionary[sel[0]]
+                try:
+                    save_config(self.cfg)
+                except Exception as e:
+                    self.status_var.set(f"設定の保存に失敗: {e}")
+                refresh()
+
+        tk.Button(
+            win, text="選択した単語を削除", font=("Meiryo", 9), bg=PANEL_DARK, fg=REC_RED,
+            activebackground=NEON_FAINT, activeforeground=REC_RED, bd=0,
+            highlightthickness=1, command=delete_selected,
+        ).pack(pady=(0, 10))
+
+    def _on_text_box_edited(self, event=None):
+        """確定後にユーザーがテキスト欄を直接書き換えたら、書き換わった箇所を
+        辞書に自動登録する(録音中・確定処理中は無視する)。"""
+        if self.recording or self.transcribing:
+            return
+        if not self._last_raw_text:
+            return
+        current = self.text_box.get("1.0", "end").rstrip("\n")
+        if current == self._last_final_text:
+            return
+        new_terms = extract_dictionary_candidates(self._last_raw_text, current)
+        dictionary = self.cfg.setdefault("custom_dictionary", [])
+        existing_terms = {e.get("term") for e in dictionary}
+        added = [t for t in new_terms if t not in existing_terms]
+        if added:
+            # 手で書き換えた分は読み方が分からないので読み方は空で登録する
+            # (ひらがな読み違いまでは直せないが、次に同じ表記のまま似た
+            # 誤変換が出た時に寄せられるようにはなる)
+            dictionary.extend({"term": t, "reading": ""} for t in added)
+            try:
+                save_config(self.cfg)
+            except Exception:
+                pass
+            self.status_var.set("辞書に自動登録: " + "、".join(added))
+        self._last_final_text = current
 
     # --- 翻訳モードの操作列 ---
     def _build_translate_row(self):
@@ -1770,13 +2110,18 @@ class App:
                 self.events.put(("status", "文章を整えています…"))
                 final_text = rule_based_cleanup(raw_text)
 
+        final_text = apply_custom_dictionary(final_text, self.cfg.get("custom_dictionary", []))
+
         if finalize_id in self._cancelled_finalize_ids:
             return
 
         self.transcribing = False
         if final_text and foreground_id != self.own_id:
             type_text_into_foreground(final_text)
+        self._last_raw_text = raw_text
+        self._last_final_text = final_text
         self.events.put(("final", final_text))
+        self.events.put(("history_add", (final_text, "dictation")))
         self.events.put(("status", self._idle_status_text()))
 
     def _finalize_translation(self, audio, model, raw_text, foreground_id, finalize_id):
@@ -1815,6 +2160,7 @@ class App:
         if foreground_id != self.own_id:
             type_text_into_foreground(translated)
         self.events.put(("final", shown))
+        self.events.put(("history_add", (shown, "translate")))
 
         if finalize_id in self._cancelled_finalize_ids:
             return
@@ -1966,6 +2312,9 @@ class App:
                     self._set_transcript(text)
             elif kind == "final":
                 self._set_transcript(payload)
+            elif kind == "history_add":
+                text, mode = payload
+                self._add_to_history(text, mode)
             elif kind == "hotkey_captured":
                 self._apply_new_hotkey(payload)
 
