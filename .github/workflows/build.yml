@@ -42,6 +42,20 @@ jobs:
         # --collect-data speech_recognition が無いとFLAC変換用のバンドル実行ファイルが
         # 同梱されず、どちらも文字起こしのたびに静かに失敗する(実際に踏んだ不具合)
         run: pyinstaller --onefile --windowed --icon=assets/icon.ico --add-data "assets;assets" --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
+      - name: 起動スモークテスト
+        # 「ビルドが通ること」だけでなく「起動すること」もCIで確認する。
+        # importの途中で例外を出して即終了する類の不具合(Mac版で実際に
+        # 発生・報告があった)をリリース前に検知するための最低限のチェック。
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist/NekoVoicePixel.exe" -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Error "NG: 起動直後に終了した(ExitCode=$($p.ExitCode))"
+            exit 1
+          }
+          Write-Output "OK: 20秒間プロセスが生存"
+          Stop-Process -Id $p.Id -Force
       - name: zipに固める
         run: Compress-Archive -Path dist/NekoVoicePixel.exe -DestinationPath NekoVoicePixel-Windows.zip
       - name: リリースにアップロード
@@ -66,12 +80,42 @@ jobs:
       - name: PyInstallerで.appを作成
         # --collect-data faster_whisper が無いとVADモデル(silero_vad_v6.onnx)が、
         # --collect-data speech_recognition が無いとFLAC変換用のバンドル実行ファイルが
-        # 同梱されず、どちらも文字起こしのたびに静かに失敗する(実際に踏んだ不具合)
-        run: pyinstaller --windowed --icon=assets/icon.icns --add-data "assets:assets" --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
-      - name: zipに固める
+        # 同梱されず、どちらも文字起こしのたびに静かに失敗する(実際に踏んだ不具合)。
+        # --osx-bundle-identifier はTCC(マイク・アクセシビリティ権限)がバンドルIDで
+        # アプリを識別するため、逆DNS形式のIDを明示的に指定する。
+        run: pyinstaller --windowed --icon=assets/icon.icns --osx-bundle-identifier com.tanakatakeshi811.nekovoicepixel --add-data "assets:assets" --collect-data faster_whisper --collect-data speech_recognition --name NekoVoicePixel main.py
+      - name: Info.plistを補正して再署名
+        # マイクを使うアプリはNSMicrophoneUsageDescriptionが無いとOSに
+        # 強制終了させられる。あわせてタグからバージョン番号を埋め込む。
+        # Info.plistを書き換えると既存の(ad-hoc)署名の封印と食い違うため、
+        # 再署名しないと「アプリケーションが壊れています」と表示され起動できなくなる。
         run: |
-          cd dist
-          zip -r ../NekoVoicePixel-Mac.zip NekoVoicePixel.app
+          PLIST=dist/NekoVoicePixel.app/Contents/Info.plist
+          VERSION="${GITHUB_REF_NAME#v}"
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string '音声を文字起こしするためにマイクを使用します。'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION:-0.0.0}" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION:-0.0.0}" "$PLIST"
+          codesign --force --deep --sign - dist/NekoVoicePixel.app
+      - name: 起動スモークテスト
+        # 「ビルドが通ること」だけでなく「起動すること」もCIで確認する。
+        # importの途中で例外を出して即終了する類の不具合(実際にMac実機の
+        # バグ報告で発覚した自己デッドロックがこれだった)をリリース前に検知する。
+        run: |
+          ./dist/NekoVoicePixel.app/Contents/MacOS/NekoVoicePixel > /tmp/smoke.log 2>&1 &
+          PID=$!
+          sleep 20
+          if kill -0 $PID 2>/dev/null; then
+            echo "OK: 20秒間プロセスが生存"
+            kill $PID
+          else
+            echo "NG: 起動直後に終了した"
+            cat /tmp/smoke.log
+            exit 1
+          fi
+      - name: zipに固める
+        # .appのアーカイブはzipよりditto(macOS標準)の方が、シンボリックリンクや
+        # 拡張属性・署名の封印を壊さず安全に固められる
+        run: ditto -c -k --sequesterRsrc --keepParent dist/NekoVoicePixel.app NekoVoicePixel-Mac.zip
       - name: リリースにアップロード
         env:
           GH_TOKEN: ${{ github.token }}

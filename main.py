@@ -71,6 +71,16 @@ if IS_MAC:
         _orig_keycode_context = _pynput_darwin.keycode_context
 
         def _run_on_main_sync(func, timeout=5):
+            # 呼び出し元が既にメインスレッドの場合、callAfterで自分自身に処理を
+            # 投げても、メインスレッドはこの直後のdone.wait()でブロックされる
+            # ため誰も実行できず、必ずタイムアウトする(自己デッドロック)。
+            # 実際にはモジュール読み込み時点(pynkb.Controller()生成時、まだ
+            # mainloopが始まっておらずメインスレッド上)でこれを踏み、Mac版が
+            # 起動直後に確実にクラッシュしていた(Mac実機のバグ報告で発覚)。
+            # メインスレッドからの呼び出しはディスパッチせず、その場で直接実行する。
+            if threading.current_thread() is threading.main_thread():
+                return func()
+
             result = {}
             done = threading.Event()
 
@@ -1024,7 +1034,22 @@ def get_foreground_id():
 
 
 # キーの送信(貼り付けキー)に使う。ホットキー検出と合わせてpynputに統一。
-_kb_controller = pynkb.Controller()
+# 生成を遅延させているのは、モジュール読み込み時点(まだmainloopが始まって
+# おらずメインスレッド上)でpynkb.Controller()がHIToolbox呼び出しを引き起こす
+# ことがあり、起動経路からは極力このAPI呼び出しを遠ざけたいため
+# (Mac実機のバグ報告での推奨に基づく)。実際に貼り付けが走る時点=GUIと
+# mainloopが動いている時点まで生成を遅らせることで、二重に安全にしている。
+_kb_controller = None
+_kb_controller_lock = threading.Lock()
+
+
+def _get_kb_controller():
+    global _kb_controller
+    if _kb_controller is None:
+        with _kb_controller_lock:
+            if _kb_controller is None:
+                _kb_controller = pynkb.Controller()
+    return _kb_controller
 
 # 修飾キー単体は「ホットキー」として使わせない(押しっぱなしと区別できないため)
 _MODIFIER_KEYS = {
@@ -1078,9 +1103,10 @@ def type_text_into_foreground(text):
     pyperclip.copy(text)
     time.sleep(0.05)
     modifier = pynkb.Key.cmd if IS_MAC else pynkb.Key.ctrl
-    with _kb_controller.pressed(modifier):
-        _kb_controller.press("v")
-        _kb_controller.release("v")
+    kb = _get_kb_controller()
+    with kb.pressed(modifier):
+        kb.press("v")
+        kb.release("v")
     time.sleep(0.2)
     if prev_clip is not None:
         try:
