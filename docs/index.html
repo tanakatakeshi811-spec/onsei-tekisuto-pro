@@ -118,6 +118,14 @@
     font-size: 0.9rem;
     line-height: 1.8;
   }
+  section.features code {
+    background: var(--panel-dark);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.85em;
+    color: var(--neon);
+  }
   .note {
     font-size: 0.8rem;
     color: var(--text-dim);
@@ -187,6 +195,30 @@
       <li>別のホットキーで翻訳モード。話した日本語を翻訳し、自動で読み上げ(相手にそのまま聞こえます)</li>
       <li>ESCキーでいつでも強制停止</li>
       <li>音声認識・文字起こしはすべて端末内で完結(外部サーバーに送信しません)</li>
+    </ul>
+  </section>
+
+  <section class="features">
+    <h2>起動できない時は</h2>
+    <p style="margin:0 0 10px;color:var(--text-main);font-size:0.88rem;">
+      未署名(公証なし)のアプリのため、初回起動時にブロックされることがあります。
+      悪意のあるファイルではありませんので、以下の方法で開いてください。
+    </p>
+    <p style="margin:0 0 4px;color:var(--neon);font-size:0.85rem;font-weight:700;">
+      Macで「"NekoVoicePixel.app"は壊れているため開けません」と出た場合
+    </p>
+    <ul>
+      <li>方法A: 一度ダブルクリックしてブロック画面を出す →「システム設定」→
+        「プライバシーとセキュリティ」を開く → 下の方に出る
+        「このまま開く」を押す(要パスワード)</li>
+      <li>方法B(ターミナル操作): <code>xattr -cr /path/to/NekoVoicePixel.app</code>
+        を実行(<code>/path/to/</code>は実際に展開した場所に置き換え)</li>
+    </ul>
+    <p style="margin:10px 0 4px;color:var(--neon);font-size:0.85rem;font-weight:700;">
+      Windowsで「WindowsによってPCが保護されました」と出た場合
+    </p>
+    <ul>
+      <li>「詳細情報」→「実行」の順に押せば起動できます</li>
     </ul>
   </section>
 
