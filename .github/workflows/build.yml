@@ -92,9 +92,16 @@ jobs:
         run: |
           PLIST=dist/NekoVoicePixel.app/Contents/Info.plist
           VERSION="${GITHUB_REF_NAME#v}"
-          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string '音声を文字起こしするためにマイクを使用します。'" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION:-0.0.0}" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION:-0.0.0}" "$PLIST"
+          # PlistBuddyのSetは既存キーの変更専用でキーが無いと失敗する。
+          # PyInstaller生成のInfo.plistにキーがあるかどうかはバージョンで
+          # 変わりうるため、Add→失敗したらSetにフォールバックして
+          # 「無ければ作る、あれば変える」を両対応にする。
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string '音声を文字起こしするためにマイクを使用します。'" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :NSMicrophoneUsageDescription '音声を文字起こしするためにマイクを使用します。'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${VERSION:-0.0.0}" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION:-0.0.0}" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${VERSION:-0.0.0}" "$PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION:-0.0.0}" "$PLIST"
           codesign --force --deep --sign - dist/NekoVoicePixel.app
       - name: 起動スモークテスト
         # 「ビルドが通ること」だけでなく「起動すること」もCIで確認する。
